@@ -9,6 +9,8 @@ var usersRouter = require('./routes/users');
 var admin = require('firebase-admin');
 
 var serviceAccount = require('./firebase-credentials.json');
+var cors = require('cors');
+
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -16,6 +18,8 @@ admin.initializeApp({
 });
 
 var app = express();
+app.use(cors());
+
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));
