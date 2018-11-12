@@ -6,6 +6,14 @@ var logger = require('morgan');
 
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
+var admin = require('firebase-admin');
+
+var serviceAccount = require('./firebase-credentials.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: 'https://rail-trax.firebaseio.com'
+});
 
 var app = express();
 
@@ -19,7 +27,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use('/', indexRouter);
+app.use('/api', indexRouter);
 app.use('/users', usersRouter);
 
 // catch 404 and forward to error handler
@@ -39,3 +47,6 @@ app.use(function(err, req, res, next) {
 });
 
 module.exports = app;
+app.listen(40000, () => {
+  console.log(' now listening on 40000');
+});
