@@ -16,7 +16,7 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL: 'https://rail-trax.firebaseio.com'
 });
-
+admin.firestore().settings( { timestampsInSnapshots: true })
 var app = express();
 app.use(cors());
 

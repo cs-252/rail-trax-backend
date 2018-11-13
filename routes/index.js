@@ -3,10 +3,7 @@ let express = require('express');
 var router = express.Router();
 var admin = require('firebase-admin');
 var DEVELOP = true ;
-router.post('/setup-session', (req, res, next) => {
-  // res.send('hello');
-  //res.send(req.body.index);
-  //console.log(req.body);
+router.post('/setup-session', (req, res) => {
   let currstmp=new Date().getTime();
   let usrstmp = new Date(req.body.pnrData.doj).getTime();
   console.log((usrstmp-currstmp)/(86400000));
@@ -18,20 +15,17 @@ router.post('/setup-session', (req, res, next) => {
   else {
       let db = admin.firestore();
       let usrdata = db.doc('sessions/'+req.body.uid);
-
       usrdata.set({uid:req.body.uid, startTime:currstmp, pnrData:req.body.pnrData})
-            .then(function(){ res.status(200).send({message:"Success"});
-        })
-            .catch(function(err){ console.log(err);
-                res.status(500).send({message:"Fail"});
-                                    });
-      //res.status(200).send("Fine");
-  }
-
-
+        .then(() => { res.status(200).send({message:"Success"})})
+        .catch(err => {
+            console.log(err);
+            res.status(500).send({message:"Fail"});
+        });
+    }
 });
 
 router.post('/end-session', (req, res, next) => {
+    console.log(req.body);
     let db = admin.firestore();
     let currstmp=new Date().getTime();
     console.log("ending session");
@@ -51,9 +45,7 @@ router.post('/end-session', (req, res, next) => {
             usracc.then(function(ddat){
                 let prevcoins=ddat.data().coins;
                 if(!prevcoins)
-                {
                     prevcoins=0;
-                }
                 coins=coins+prevcoins;
                 if(DEVELOP)
                 {
@@ -67,12 +59,21 @@ router.post('/end-session', (req, res, next) => {
                     .then(function(){res.status(200).send({message:"Session ended",earnings:(coins-prevcoins)})
                 })
                 })
-                .catch(function(){
+                .catch(function(err){
+                    console.error(err);
                     res.status(500).send({message:"Internal error"})
-                })
+                });
+            }).then(() => {
+                let sHist = req.body.userData.sessionHistory;
+                if(!sHist) sHist = [];
+                sHist.push({
+                    earnings: DEVELOP?100:coins,
+                    startTime: startstmp,
+                    endTime: currstmp,
+                    train: req.body.pnrData.train.name+' ('+req.body.pnrData.train.number+')'
+                });
+                db.doc('users/'+req.body.uid).update({sessionHistory: sHist})
             });
-
-
         }
         console.log("session must end");
     });
@@ -80,20 +81,21 @@ router.post('/end-session', (req, res, next) => {
 });
 
 router.post('/location-info', (req, res, next) => {
-    //res.status(200).send();
-    console.log(req.body.geoData);
     let db = admin.firestore();
-    let traindata = db.doc('trains/'+req.body.pnrData.train).get();
+    console.log(req.body.sessionData.pnrData.train.number);
+    // return;
+    let traindata = db.doc('trains/train'+req.body.sessionData.pnrData.train.number).get();
     let currstmp=new Date().getTime();
     traindata.then(function(datt){
+        console.log('Got train data, now looking through feeders');
         let feeders = datt.data().feeders;
         //feeders.push({uid:req.body.uid,geoData:req.body.geoData,timestamp:currstmp})
-        for(let i=0;i<feeders.length();i++)
+        for(let i=0;i<feeders.length;i++)
         {
-            if((feeders[i].timestmp-currstmp)/(10*60*1000) > 1)
+            if((-feeders[i].timestmp+currstmp)/(10*60*1000) > 1)
             {
-
-                let usrdata = db.doc('sessions/'+req.body.uid).get();
+                console.log('Stray feeder found. End his session');
+                let usrdata = db.doc('sessions/'+req.body.sessionData.uid).get();
                 console.log("got the user data");
                 usrdata.then(function(doc){
                     if(!doc.exists)
@@ -105,59 +107,61 @@ router.post('/location-info', (req, res, next) => {
                         let startstmp=doc.data().startTime;
                         let coins=10*(Math.floor((currstmp-startstmp)/(10*60*1000)));
                         coins=coins -10;
-                        let usracc = db.doc('users/'+req.body.uid).get();
+                        let usracc = db.doc('users/'+req.body.sessionData.uid).get();
                         console.log("lets update the coins");
                         usracc.then(function(ddat){
                             let prevcoins=ddat.data().coins;
-                            if(!prevcoins)
-                            {
-                                prevcoins=0;
-                            }
+                            if(!prevcoins) prevcoins=0;
                             coins=coins+prevcoins;
                             if(DEVELOP)
                             {
                                 coins=100;
                                 prevcoins=0;
                             }
-                            db.doc('users/'+req.body.uid).update({coins:coins})
-                            .then(function(){
-                                db.doc('sessions/'+req.body.uid).delete()
-                                .then(function(){res.status(200).send({message:"Session ended",earnings:(coins-prevcoins)})
+                            db.doc('users/'+req.body.sessionData.uid).update({coins:coins})
+                              .then(() => {
+                                db.doc('sessions/'+req.body.sessionData.uid).delete()
+                                .then(() => {
+                                    res.status(200).send({message:"Session ended",earnings:(coins-prevcoins)});
+                                });
                             })
-                            })
-                            .catch(function(){
-                                res.status(500).send({message:"Internal error"})
+                            .catch(function(err){
+                                res.status(500).send({message:"Internal error"});
+                                console.error(err);
                             })
                         });
-
-
                     }
-                    });
-                    let removed=feeders.splice(i,1);
+                });
             }
-
-            if(feeders[i].uid==req.body.uid && req.body.packet_no>feeders[i].packet_no)
-            {
+            if(feeders[i].uid==req.body.sessionData.uid)
                 feeders[i].geoData=req.body.geoData;
-            }
-
-            if(feeders[i].uid!=req.body.uid && i==feeders.length()-1)
-            {
-                feeders.push({uid:req.body.uid,geoData:req.body.geoData,timestamp:currstmp,packet_no:req.body.packet_no});
+        }
+        var found = false;
+        for(let i = 0; i < feeders.length; i++) {
+            if (feeders[i].uid === req.body.sessionData.uid) {
+                found = true;
+                break;
             }
         }
+        if(!found)
+            feeders.push({uid:req.body.sessionData.uid,geoData:req.body.geoData,timestamp:currstmp});
 
         let geolocation={latitude:0,longitude:0,accuracy:0};
-        for(let i=0;i<feeders.length();i++)
+        for(let i=0;i<feeders.length;i++)
         {
-            geolocation.latitude=feeders[i].latitude+geolocation.latitude;
-            geolocation.longitude=feeders[i].longitude+geolocation.longitude;
-            geolocation.accuracy=feeders[i].accuracy+geolocation.accuracy;
+            geolocation.latitude += feeders[i].geoData.latitude;
+            geolocation.longitude += feeders[i].geoData.longitude;
+            geolocation.accuracy += feeders[i].geoData.accuracy;
         }
-        geolocation.latitude=geolocation.latitude/feeders.length();
-        geolocation.longitude=geolocation.longitude/feeders.length();
-        geolocation.accuracy=geolocation.accuracy/feeders.length();
-        db.doc('trains/'+req.body.pnrData.train).update({location:geolocation,feeders:feeders});
+        geolocation.latitude=geolocation.latitude/feeders.length;
+        geolocation.longitude=geolocation.longitude/feeders.length;
+        geolocation.accuracy=geolocation.accuracy/feeders.length;
+        console.log('Updating geo location', geolocation, feeders);
+        db.doc('trains/train'+req.body.sessionData.pnrData.train.number)
+            .update({location:geolocation,feeders:feeders})
+            .then(() => {
+                res.status(200).send({message: 'pushed'});
+            });
     });
 });
 
